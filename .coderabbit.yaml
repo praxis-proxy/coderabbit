@@ -1,0 +1,247 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Organization-wide CodeRabbit configuration for praxis-proxy.
+#
+# CodeRabbit reads this file from the default branch of
+# praxis-proxy/coderabbit and applies it to every repository in the
+# organization that does not ship its own .coderabbit.yaml. A repository
+# that needs additions must set `inheritance: true` in its own file;
+# without it, the repository config replaces this one entirely. See
+# README.md.
+#
+# Everything here is expected to hold for every Praxis repository. The
+# conventions cited below are documented in the conventions template
+# (praxis-proxy/conventions) and mirrored in each repository's
+# CONTRIBUTING.md, AGENTS.md, and docs/. Anything specific to one
+# repository's layout belongs in that repository's own config.
+#
+# CodeRabbit supplements human review; it does not replace it. Every
+# contributor remains responsible for the code they submit, per the Code
+# Responsibility section of each repository's CONTRIBUTING.md.
+
+reviews:
+  profile: "assertive"
+
+  # Never approve or gate a PR. Approval is a human decision, and each
+  # repository already gates merges on its own required checks.
+  request_changes_workflow: false
+
+  in_progress_fortune: false
+
+  auto_review:
+    # Defaults to 5, which silently pauses automatic review after five
+    # reviewed commits since the last pause. Praxis PRs iterate over
+    # many pushes, and a silent pause is indistinguishable from the
+    # review having failed.
+    auto_pause_after_reviewed_commits: 0
+
+  # CodeRabbit must not author code. CONTRIBUTING.md rejects PRs from a
+  # bot or tool, and every commit carries a human Signed-off-by
+  # asserting the author reviewed and understands the change. Disabled
+  # by intent rather than by default, so a future change to CodeRabbit's
+  # defaults cannot turn code authoring back on.
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+    simplify:
+      enabled: false
+
+  # Lockfiles, build output, and binary assets are large and
+  # mechanically maintained; reviewing them produces no signal. A
+  # repository with further generated or recorded trees adds them to its
+  # own config.
+  path_filters:
+    - "!Cargo.lock"
+    - "!target/**"
+    - "!assets/**"
+
+  tools:
+    # Already enforced in CI, and more strictly than CodeRabbit would:
+    # every repository's `make lint` runs Clippy with -D warnings, and
+    # actionlint and shellcheck run over .github/workflows and hack
+    # scripts. Duplicate findings would be noise. A repository that does
+    # not yet run one of these can re-enable it in its own config.
+    clippy:
+      enabled: false
+    actionlint:
+      enabled: false
+    shellcheck:
+      enabled: false
+    # CI results are already visible on the PR.
+    github-checks:
+      enabled: false
+
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        Review changes against the engineering standards established by
+        this repository.
+
+        CONTRIBUTING.md, AGENTS.md, and the convention and development
+        documents under docs/ are authoritative. Do not introduce
+        stylistic, architectural, or implementation preferences that
+        conflict with them. When reporting a convention violation, cite
+        the convention.
+
+        Prioritize substantive findings involving:
+        - correctness and security
+        - adherence to established Praxis architecture and patterns
+        - unnecessary complexity
+        - functions or modules with unfocused responsibilities
+        - unnecessary mutable state or side effects
+        - unnecessary allocations, copies, or cloning
+        - error handling and failure behavior
+        - concurrency and async correctness
+        - public API and compatibility implications
+        - insufficient or inappropriate testing
+        - protocol and RFC correctness
+        - inappropriate data or type modeling
+        - unnecessary or questionable new dependencies
+        - performance regressions
+
+        For new capabilities, verify that the change includes the
+        testing and example artifacts the repository's development
+        conventions require.
+
+        Do not repeat findings already enforced mechanically by rustfmt,
+        Clippy, cargo-audit, cargo-deny, cargo-machete, typos, taplo,
+        markdownlint, lychee, cargo xtask checks, or repository CI,
+        unless the finding indicates a broader correctness, security, or
+        architectural problem.
+
+        Avoid subjective style recommendations. Repository conventions
+        take precedence over generic language preferences.
+
+    - path: "**/*.rs"
+      instructions: |
+        Praxis crates are performance-sensitive. Flag cloning of
+        request, response, header, body, or SSE data where borrowing,
+        moving, or sharing through an existing ownership boundary would
+        work. A necessary clone should sit at the boundary that requires
+        ownership, with the reason evident from the surrounding code or
+        test.
+
+        Streaming and SSE paths must process chunks incrementally —
+        BodyMode::Stream in filters built on praxis-filter. Flag any
+        change that buffers a full streaming response or upstream
+        payload to satisfy local control flow.
+
+        Prefer making invalid states unrepresentable through the type
+        system and serde over runtime validation, per the repository's
+        type design conventions: enums over strings for fixed value
+        sets, structs with deny_unknown_fields over maps for known keys,
+        a single enum over several mutually exclusive Option fields.
+
+        Validate only the fields the proxy itself needs. Parameter
+        ranges, model availability, and role ordering are the backend's
+        concern.
+
+        Comments answer "why", never "what". Runtime narration belongs
+        in tracing, not comments. Flag comments that restate what the
+        code or an identifier already conveys.
+
+        Lint suppressions use #[expect(...)] with a reason, never
+        #[allow(...)].
+
+        Do not hold a Mutex, RwLock, or RefCell guard across an .await
+        point.
+
+        Assertions carry an explanatory message rather than a preceding
+        comment.
+
+        For protocol-level behavior involving HTTP semantics, headers,
+        or TLS, verify that the governing RFC has been considered and
+        that conformance tests cite the RFC number and section.
+
+        Praxis ships FIPS builds, where all cryptography comes from the
+        host's OpenSSL through the provider API. In crypto or TLS code,
+        flag any change that enables a FIPS provider from application
+        code, uses OpenSSL's legacy non-provider digest API, or vendors
+        or statically links OpenSSL. See the repository's FIPS
+        documentation (docs/developing/fips.md where present).
+
+    - path: "**/Cargo.toml"
+      instructions: |
+        Dependencies belong in [workspace.dependencies] so versions stay
+        consistent across crates, and must be pinned to three-component
+        semver (MAJOR.MINOR.PATCH).
+
+        Keep dependencies light. Question any new dependency, and weigh
+        its reputation and maintenance history. Outside the praxis
+        repository itself, the Praxis core crates (praxis-filter,
+        praxis-core, praxis-protocol, praxis-tls) are consumed as
+        versioned releases, not path dependencies.
+
+        A FIPS build must not compile a bundled crypto backend. Flag a
+        new dependency that pulls ring, aws-lc-rs, sha2, hmac, or a
+        vendored OpenSSL into the FIPS feature set's dependency graph —
+        reqwest-based additions are the common source. Digests and MACs
+        must reach the host provider instead.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        Workflows that post PR comments must authenticate with the
+        praxis-bot-app GitHub App token via
+        actions/create-github-app-token, not the default github.token.
+
+        Third-party actions must be pinned to a full commit SHA with the
+        version in a trailing comment.
+
+knowledge_base:
+  # Treat each repository's convention documents as the source of truth
+  # for review guidance. The patterns cover the layouts actually in use
+  # across the organization:
+  #
+  # - CONTRIBUTING.md sits at the repository root in most repositories
+  #   and under .github/ in praxis-proxy/ai, so both are matched.
+  # - AGENTS.md and .claude/CLAUDE.md are the same document in most
+  #   repositories. CLAUDE.md is matched anyway because benchmarks and
+  #   conventions have no AGENTS.md, and experimental's two copies have
+  #   drifted apart.
+  # - Development conventions live under docs/developing/ (praxis, ai,
+  #   grid), docs/dev/ (policy), or as docs/conventions.md and
+  #   docs/development.md (operator, grid, experimental, benchmarks,
+  #   conventions).
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "**/AGENTS.md"
+      - "**/CLAUDE.md"
+      - "**/CONTRIBUTING.md"
+      - "docs/developing/*.md"
+      - "docs/dev/*.md"
+      - "docs/conventions.md"
+      - "docs/development.md"
+
+  # Most repositories consume the Praxis core crates as versioned
+  # releases, so the API being reviewed against lives in another
+  # repository. Linking it lets a review check a filter or pipeline call
+  # against the real signatures rather than inferring them.
+  linked_repositories:
+    - repository: "praxis-proxy/praxis"
+      instructions: |
+        The Praxis proxy and the core crates (praxis-core,
+        praxis-filter, praxis-protocol, praxis-tls) that the other
+        repositories consume as versioned releases. Use it for the
+        HttpFilter and TcpFilter traits, pipeline and branch chain
+        behavior, filter registration, and body access and buffering
+        modes, and to judge whether a change depends on unreleased
+        core behavior.
+    - repository: "praxis-proxy/conventions"
+      instructions: |
+        The development conventions template for the organization. Use
+        it as the baseline when a repository's own convention documents
+        are silent on a point.
+
+chat:
+  # Consistent with poem and in_progress_fortune: no decorative output
+  # in review threads.
+  art: false
